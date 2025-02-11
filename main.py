@@ -100,17 +100,37 @@ def hs_distance(r1, r2):
 def pre_sel(r0, r1, r2):
     return np.trace((r0 - r1) @ (r2 - r1)).real
 
+# def to_maximize(x, *args):
+# Old definition with more expm operations
+#     rho2, rho3, base_un, dim_list, lenlist, herm = args
+#     # herm = [np.eye(d) for d in dim_list]
+#     # lenlist = [len(base_un[i]) for i in range(len(base_un))]
+#     offset = 0
+#     l_base = len(base_un)
+#     for i in range(l_base):
+#         herm[i] = sum(1j * x[j + offset] * base_un[i][j] for j in range(lenlist[i]))
+#         herm[i] = sp.linalg.expm(herm[i])
+#         offset += lenlist[i]
+#     unit = ft.reduce(np.kron, herm)
+#     rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
+#     # print(unit)
+#     return -np.trace(rho3 @ rho2u).real
 
 def to_maximize(x, *args):
+    # New definition with less expm operations
     rho2, rho3, base_un, dim_list, lenlist, herm = args
     # herm = [np.eye(d) for d in dim_list]
     # lenlist = [len(base_un[i]) for i in range(len(base_un))]
     offset = 0
-    for i in range(len(base_un)):
+    l_base = len(base_un)
+    exponent = np.zeros((np.prod(dim_list), np.prod(dim_list)), complex)
+    for i in range(l_base):
         herm[i] = sum(1j * x[j + offset] * base_un[i][j] for j in range(lenlist[i]))
-        herm[i] = sp.linalg.expm(herm[i])
+        list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
+        list_id[i] = herm[i]
+        exponent += ft.reduce(np.kron, list_id)
         offset += lenlist[i]
-    unit = ft.reduce(np.kron, herm)
+    unit = sp.linalg.expm(exponent)
     rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
     # print(unit)
     return -np.trace(rho3 @ rho2u).real
@@ -119,24 +139,31 @@ def to_maximize(x, *args):
 def optimize_rho2(rho0, rho1, rho2_ket, pre1, nq, dim_list, basis_unitary):
     rho3 = rho0 - rho1
     rho2 = make_density(rho2_ket)
-    herm = [np.eye(d) for d in dim_list]
-    lenlist = [dim_list[i] ** 2 for i in range(nq)]
+    herm = [np.eye(d, dtype=complex) for d in dim_list]
+    lenlist = dim_list*dim_list
     x0 = np.ones(sum(lenlist))
-    x_bounds = sp.optimize.Bounds(np.zeros_like(x0), np.full_like(x0, 4), True)
+    x_bounds = sp.optimize.Bounds(np.zeros_like(x0), np.full_like(x0, 10), True)
     # res = sp.optimize.minimize(to_maximize, x0, (rho2, rho3, basis_unitary, dim_list, lenlist, herm),
     # method='Powell', bounds=x_bounds)
     # res = sp.optimize.basinhopping(to_maximize, x0, 100,
     #                                minimizer_kwargs={'args': (rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
-    res = sp.optimize.differential_evolution(to_maximize, x_bounds,
-                                             (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
+    res = sp.optimize.differential_evolution(to_maximize, x_bounds,(rho2, rho3, basis_unitary, dim_list, lenlist, herm))
+    #res = sp.optimize.minimize(to_maximize, x0,
+    #                           (rho2, rho3, basis_unitary, dim_list, lenlist, herm), 'Nelder-Mead')
+    # res = sp.optimize.dual_annealing(to_maximize, x_bounds,
+    #                                        (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
     # minimizer_kwargs={args:(rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
     xres = res.x
     offset = 0
-    for i in range(len(basis_unitary)):
+    l_base = len(basis_unitary)
+    exponent = np.zeros((np.prod(dim_list), np.prod(dim_list)), complex)
+    for i in range(l_base):
         herm[i] = sum(1j * xres[j + offset] * basis_unitary[i][j] for j in range(lenlist[i]))
-        herm[i] = sp.linalg.expm(herm[i])
+        list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
+        list_id[i] = herm[i]
+        exponent += ft.reduce(np.kron, list_id)
         offset += lenlist[i]
-    unit = ft.reduce(np.kron, herm)
+    unit = sp.linalg.expm(exponent)
     rho4 = unit @ rho2 @ np.transpose(np.conjugate(unit))
     pre2 = pre_sel(rho0, rho1, rho4)
     if pre2 > pre1:
@@ -145,7 +172,7 @@ def optimize_rho2(rho0, rho1, rho2_ket, pre1, nq, dim_list, basis_unitary):
         return pre1, rho2
 
 
-def gilbert(rho_in, nq, dim_list, max_iter, max_trials, opt_state="on", rng_seed=666, rho1_in=None):
+def gilbert(rho_in: np.array, nq: int, dim_list: np.array, max_iter: int, max_trials: int, opt_state="on", rng_seed=666, rho1_in=None):
     """
     Approximate the Closest Separable State (CSS) to the given state rho_in using Gilbert's algorithm
     :param rho_in: matrix
@@ -164,7 +191,8 @@ def gilbert(rho_in, nq, dim_list, max_iter, max_trials, opt_state="on", rng_seed
         rho1 = np.diag(np.diag(rho))
     else:
         rho1 = rho1_in
-    ndim = np.multiply.reduce(dim_list)
+    # ndim = np.multiply.reduce(dim_list)
+    print(rho1)
     rho2_ket = random_pure_dl(dim_list)
     rho2 = make_density(rho2_ket)
     dist0 = hs_distance(rho0, rho1)
@@ -174,7 +202,10 @@ def gilbert(rho_in, nq, dim_list, max_iter, max_trials, opt_state="on", rng_seed
     pre2 = 0.
     iter = 1
     while iter <= max_iter and trials <= max_trials:
+        # if iter % 5 == 0:
+        #       print(iter, dist0)
         print(iter, dist0)
+
         while pre1 < 0 and trials <= max_trials:
             rho2_ket = random_pure_dl(dim_list)
             rho2 = make_density(rho2_ket)
@@ -209,7 +240,7 @@ def get_diagonal(rho):
 if __name__ == '__main__':
     # rho = random_pure_dl([2, 2])
     # rho = make_density(rho)
-    dim_list = [2, 2, 2]
+    dim_list = np.array([2, 2, 2])
     rho = np.array([[0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 1 / 3., 1 / 3., 0, 1 / 3., 0, 0, 0],
                     [0, 1 / 3., 1 / 3., 0, 1 / 3., 0, 0, 0],
@@ -217,11 +248,12 @@ if __name__ == '__main__':
                     [0, 1 / 3., 1 / 3., 0, 1 / 3., 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 0]])
+                    [0, 0, 0, 0, 0, 0, 0, 0]]).astype(complex)
     # rho = sp.io.mmread("wxstate.mtx")
     print(rho)
     # approx = sp.io.mmread("wxcss.mtx")
     css, dist, trials = gilbert(rho, 3, dim_list, 10, 10000000000, opt_state="on")  # , rho1_in=approx)
+
     print(css, dist, trials)
     sp.io.mmwrite("wxcss.mtx", css)
 
