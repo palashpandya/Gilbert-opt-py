@@ -1,10 +1,17 @@
 # This is a sample Python script.
+# import os.path
+# from typing import Any
 
 # Press Shift+F10 to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 import numpy as np
 import functools as ft
-import scipy as sp
+
+# from numpy import ndarray, dtype, generic, bool_
+from scipy import optimize, io, linalg
+import time
+
+# from prompt_toolkit.utils import to_str
 
 
 def purity(r):
@@ -130,26 +137,36 @@ def to_maximize(x, *args):
         list_id[i] = herm[i]
         exponent += ft.reduce(np.kron, list_id)
         offset += lenlist[i]
-    unit = sp.linalg.expm(exponent)
+    unit = linalg.expm(exponent)
+    # rho2u = unit @ np.transpose(np.conjugate(unit))
+
     rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
     # print(unit)
     return -np.trace(rho3 @ rho2u).real
 
 
-def optimize_rho2(rho0, rho1, rho2_ket, pre1, nq, dim_list, basis_unitary):
+def optimize_rho2(rho0, rho1, rho2_ket, pre1, dim_list, basis_unitary):
     rho3 = rho0 - rho1
     rho2 = make_density(rho2_ket)
+    rho2new = rho2
     herm = [np.eye(d, dtype=complex) for d in dim_list]
     lenlist = dim_list*dim_list
+    # rho4 = rho2
+    # pre11 = pre1
+    # pre2 = pre_sel(rho0, rho1, rho4)
+    # ostep = 0
+    # while pre2 >= pre11 and ostep < 5:
+    #     print("ostep = %s", ostep, pre2, pre11)
+    #     ostep += 1
+    #     rho2new = rho4
+    #     pre11 = pre2
     x0 = np.ones(sum(lenlist))
-    x_bounds = sp.optimize.Bounds(np.zeros_like(x0), np.full_like(x0, 10), True)
-    # res = sp.optimize.minimize(to_maximize, x0, (rho2, rho3, basis_unitary, dim_list, lenlist, herm),
-    # method='Powell', bounds=x_bounds)
-    # res = sp.optimize.basinhopping(to_maximize, x0, 100,
-    #                                minimizer_kwargs={'args': (rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
-    res = sp.optimize.differential_evolution(to_maximize, x_bounds,(rho2, rho3, basis_unitary, dim_list, lenlist, herm))
-    #res = sp.optimize.minimize(to_maximize, x0,
-    #                           (rho2, rho3, basis_unitary, dim_list, lenlist, herm), 'Nelder-Mead')
+    x_bounds = optimize.Bounds(np.full_like(x0, -10.), np.full_like(x0, 10.), False)
+    res = optimize.minimize(to_maximize, x0, (rho2, rho3, basis_unitary, dim_list, lenlist, herm), method='bfgs')#, bounds=x_bounds)
+    # res = sp.optimize.basinhopping(to_maximize, x0, 100, minimizer_kwargs={
+    # 'args': (rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
+    # res = sp.optimize.differential_evolution(to_maximize, x_bounds, (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
+    # res = sp.optimize.minimize(to_maximize, x0, (rho2new, rho3, basis_unitary, dim_list, lenlist, herm), 'Nelder-Mead')
     # res = sp.optimize.dual_annealing(to_maximize, x_bounds,
     #                                        (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
     # minimizer_kwargs={args:(rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
@@ -163,13 +180,15 @@ def optimize_rho2(rho0, rho1, rho2_ket, pre1, nq, dim_list, basis_unitary):
         list_id[i] = herm[i]
         exponent += ft.reduce(np.kron, list_id)
         offset += lenlist[i]
-    unit = sp.linalg.expm(exponent)
-    rho4 = unit @ rho2 @ np.transpose(np.conjugate(unit))
+    unit = linalg.expm(exponent)
+    rho4 = unit @ rho2new @ np.transpose(np.conjugate(unit))
     pre2 = pre_sel(rho0, rho1, rho4)
+    # print(pre2,pre11)
+
     if pre2 > pre1:
-        return pre2, rho4
+        return pre2, rho4, unit @ rho2_ket
     else:
-        return pre1, rho2
+        return pre1, rho2new, rho2_ket
 
 
 def gilbert(rho_in: np.array, nq: int, dim_list: np.array, max_iter: int, max_trials: int, opt_state="on", rng_seed=666, rho1_in=None):
@@ -183,8 +202,10 @@ def gilbert(rho_in: np.array, nq: int, dim_list: np.array, max_iter: int, max_tr
     :param rng_seed: seed for RNG
     :param opt_state: Optimization On/Off, default "on"
     :param rho1_in: Optional start state
+    # :param file_out: output file for the list of corrections
     :return: CSS, min HS-distance, number of trials
     """
+    print(rho)
     np.random.seed(rng_seed)
     rho0 = rho_in
     if rho1_in is None:
@@ -197,34 +218,78 @@ def gilbert(rho_in: np.array, nq: int, dim_list: np.array, max_iter: int, max_tr
     rho2 = make_density(rho2_ket)
     dist0 = hs_distance(rho0, rho1)
     trials = 1
+    decrement = 0.
     basis_unitary = [gell_mann_basis(x) for x in dim_list]
     pre1 = pre_sel(rho0, rho1, rho2)
     pre2 = 0.
     iter = 1
-    while iter <= max_iter and trials <= max_trials:
-        # if iter % 5 == 0:
-        #       print(iter, dist0)
-        print(iter, dist0)
+    rho1_list = [rho1]
+    dist_list = [dist0]
+    file_out = 'output'
+    if opt_state == "on" or opt_state == "On":
+        while iter <= max_iter and trials <= max_trials:
+            # if iter % 5 == 0:
+            #       print(iter, dist0)
+            print(iter, dist0)
 
-        while pre1 < 0 and trials <= max_trials:
+            while pre1 < 0 and trials <= max_trials:
+                rho2_ket = random_pure_dl(dim_list)
+                rho2 = make_density(rho2_ket)
+                pre1 = pre_sel(rho0, rho1, rho2)
+                trials += 1
+            if trials > max_trials:
+                break
+
+            pre1, rho2, rho2_ket = optimize_rho2(rho0, rho1, rho2_ket, pre1, dim_list, basis_unitary)
+            p = 1 - pre1 / hs_distance(rho1, rho2)
+            dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
+            decrement = dist0 - dist1
+            if 0 <= p <= 1 and dist1 < dist0:
+                iter += 1
+                rho1 = p * rho1 + (1 - p) * rho2
+                decrement = dist0 - dist1
+                dist0 = dist1
+                rho1_list.append(rho1)
+
+                dist_list.append(dist0)
+            if decrement < 0.0000001:
+                rho2_ket = random_pure_dl(dim_list)
+                rho2 = make_density(rho2_ket)
+            pre1 = pre_sel(rho0, rho1, rho2)
+            trials += 1
+    else:
+        while iter <= max_iter and trials <= max_trials:
+            # if iter % 5 == 0:
+            #       print(iter, dist0)
+            print(iter, dist0)
+
+            while pre1 < 0 and trials <= max_trials:
+                rho2_ket = random_pure_dl(dim_list)
+                rho2 = make_density(rho2_ket)
+                pre1 = pre_sel(rho0, rho1, rho2)
+                trials += 1
+            if trials > max_trials:
+                break
+            p = 1 - pre1 / hs_distance(rho1, rho2)
+            dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
+            if 0 <= p <= 1 and dist1 < dist0:
+                iter += 1
+                rho1 = p * rho1 + (1 - p) * rho2
+                dist0 = dist1
+                rho1_list.append(rho1)
+                dist_list.append(dist0)
             rho2_ket = random_pure_dl(dim_list)
             rho2 = make_density(rho2_ket)
             pre1 = pre_sel(rho0, rho1, rho2)
             trials += 1
-        if trials > max_trials:
-            break
-        if opt_state == "on" or opt_state == "On":
-            pre1, rho2 = optimize_rho2(rho0, rho1, rho2_ket, pre1, nq, dim_list, basis_unitary)
-        p = 1 - pre1 / hs_distance(rho1, rho2)
-        dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
-        if 0 <= p <= 1 and dist1 < dist0:
-            iter += 1
-            rho1 = p * rho1 + (1 - p) * rho2
-            dist0 = dist1
-        rho2_ket = random_pure_dl(dim_list)
-        rho2 = make_density(rho2_ket)
-        pre1 = pre_sel(rho0, rho1, rho2)
-        trials += 1
+        # np.savetxt(file_out + ".csv", rho1_list)
+        np.savetxt(file_out + "2.csv", dist_list)
+            # with open(file_out, 'w') as file:
+            # #     data = '\n'.join(rho1_list)
+            # #     file.write(data)
+            # # with open(file_out + '2.txt', 'w') as file:
+            # #     data = '\n'.join(to_str( dist_list))
+            #     file.write( dist_list)
     return rho1, dist0, trials
 
 
@@ -249,12 +314,26 @@ if __name__ == '__main__':
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0]]).astype(complex)
-    # rho = sp.io.mmread("wxstate.mtx")
-    print(rho)
+    # rho = np.array([[0.5, 0, 0, 0, 0, 0, 0, 0.5],
+    #                 [0, 0., 0 / 3., 0, 0 / 3., 0, 0, 0],
+    #                 [0, 0 / 3., 0 / 3., 0, 0 / 3., 0, 0, 0],
+    #                 [0, 0, 0, 0, 0, 0, 0, 0],
+    #                 [0, 0 / 3., 0 / 3., 0, 0 / 3., 0, 0, 0],
+    #                 [0, 0, 0, 0, 0, 0, 0, 0],
+    #                 [0, 0, 0, 0, 0, 0, 0, 0],
+    #                 [0.5, 0, 0, 0, 0, 0, 0, 0.5]]).astype(complex)
+    # file_name = input('Enter the name for a matrix file (*.mtx): ')
+    # if os.path.exists(file_name):
+    #     rho = sp.io.mmread(file_name)
+    # else:
+    #     print("Unable to find the matrix.")
+    # print(rho)
     # approx = sp.io.mmread("wxcss.mtx")
-    css, dist, trials = gilbert(rho, 3, dim_list, 10, 10000000000, opt_state="on")  # , rho1_in=approx)
+    start = time.time()
+    css, dist, trials = gilbert(rho, 3, dim_list, 50, 10000000000, opt_state="on")  # (, rho1_in=approx)
+    stop = time.time()
 
-    print(css, dist, trials)
-    sp.io.mmwrite("wxcss.mtx", css)
+    print(css, dist, trials, stop-start)
+    io.mmwrite("ghz_css.mtx", css)
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
