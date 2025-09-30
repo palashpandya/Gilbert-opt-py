@@ -18,21 +18,32 @@ if __name__ == '__main__':
     dim_list = np.fromstring(config['DEFAULT']['dimList'], dtype=int, sep=' ')
     max_iter = int(config['DEFAULT']['maxIterations'])
     max_trials = int(config['DEFAULT']['maxTrials'])
+    new_beginning = config['DEFAULT']['startFromBeginning']
     print(inpFile,outFile,outFile2)
     dim_list2 = np.array([2, 2, 2])
+    rho = np.array([])
+    rho1 = np.array([])
     if path.exists(inpFile):
         rho = io.mmread(inpFile)
     else:
         print("ERROR: Unable to find the input matrix. Check the name supplied in the config.")
         exit(0)
+    if new_beginning.lower()=='false':
+            if path.exists(outFile):
+                rho1 = io.mmread(outFile)
+            else:
+                print("ERROR: Unable to find the old output matrix. Check the name supplied in the config.")
+                exit(0)
 
     start = time.time()
-    css, dist, trials, dist_list = gilbert(rho,  dim_list, max_iter, max_trials, opt_state="on")  # (, rho1_in=approx)
+    css, dist, trials, dist_list = gilbert(rho, dim_list, max_iter, max_trials, opt_state="on", rho1_in=(rho1 if new_beginning.lower()=='false' else None))  # (, rho1_in=approx)
     stop = time.time()
 
     print(css, dist, trials, stop-start)
     io.mmwrite(outFile, css)
-    np.savetxt(outFile2, dist_list)
-    generate_report(dist_list)
+    with open(outFile2,'ab') as f:
+        f.write(b'\n')
+        np.savetxt(f, dist_list)
+#    generate_report(dist_list)
 
 
