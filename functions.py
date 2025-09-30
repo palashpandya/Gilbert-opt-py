@@ -2,6 +2,8 @@ import numpy as np
 # from numpy import ndarray, dtype, generic, bool_
 from functools import reduce
 from scipy import linalg, optimize
+from matplotlib import pyplot as plt
+
 def purity(r):
     """
     Purity of the state r, calculated as Tr(r**2).
@@ -93,25 +95,34 @@ def hs_distance(r1, r2):
 
 
 def pre_sel(r0, r1, r2):
+    """
+    Essentially gives the cosine of the angle between (r0-r1) and (r2-r1).
+    Positive value indicates r2 is a good candidate, otherwise, r2 is rejected.
+    This is also the value that is maximized in the function optimize_rho2 and thus to_maximize.
+    :param r0:
+    :param r1:
+    :param r2:
+    :return: float
+    """
     return np.trace((r0 - r1) @ (r2 - r1)).real
 
-# def to_maximize(x, *args):
-# Old definition with more expm operations
-#     rho2, rho3, base_un, dim_list, lenlist, herm = args
-#     # herm = [np.eye(d) for d in dim_list]
-#     # lenlist = [len(base_un[i]) for i in range(len(base_un))]
-#     offset = 0
-#     l_base = len(base_un)
-#     for i in range(l_base):
-#         herm[i] = sum(1j * x[j + offset] * base_un[i][j] for j in range(lenlist[i]))
-#         herm[i] = sp.linalg.expm(herm[i])
-#         offset += lenlist[i]
-#     unit = ft.reduce(np.kron, herm)
-#     rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
-#     # print(unit)
-#     return -np.trace(rho3 @ rho2u).real
-
 def to_maximize(x, *args):
+#Old definition with more expm operations
+    rho2, rho3, base_un, dim_list, lenlist, herm = args
+    # herm = [np.eye(d) for d in dim_list]
+    # lenlist = [len(base_un[i]) for i in range(len(base_un))]
+    offset = 0
+    l_base = len(base_un)
+    for i in range(l_base):
+        herm[i] = sum(1j * x[j + offset] * base_un[i][j] for j in range(lenlist[i]))
+        herm[i] = linalg.expm(herm[i])
+        offset += lenlist[i]
+    unit = reduce(np.kron, herm)
+    rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
+    # print(unit)
+    return -np.trace(rho3 @ rho2u).real
+
+def to_maximize2(x, *args):
     # New definition with less expm operations
     rho2, rho3, base_un, dim_list, lenlist, herm = args
     # herm = [np.eye(d) for d in dim_list]
@@ -133,10 +144,23 @@ def to_maximize(x, *args):
     return -np.trace(rho3 @ rho2u).real
 
 
-def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary):
+def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary, herm):
+    """
+    Maximize the overlap of rho2 with the vector (rho1-rho3) using local unitary rotations on the partitions
+    :param rho0:
+    :param rho1:
+    :param rho2_ket:
+    :param rho2:
+    :param rho3:
+    :param pre1:
+    :param dim_list:
+    :param basis_unitary:
+    :param herm:
+    :return:
+    """
     #rho2 = make_density(rho2_ket)
     rho2new = rho2
-    herm = [np.eye(d, dtype=complex) for d in dim_list]
+
     lenlist = dim_list*dim_list
     # rho4 = rho2
     # pre11 = pre1
@@ -209,16 +233,16 @@ def gilbert(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int
     basis_unitary = [gell_mann_basis(x) for x in dim_list]
     pre1 = pre_sel(rho0, rho1, rho2)
     pre2 = 0.
-    iter = 1
+    itr = 1
     rho1_list = [rho1]
     dist_list = [dist0]
     rho3 = rho0 - rho1
+    herm = [np.eye(d, dtype=complex) for d in dim_list]
     if opt_state.lower() == "on":
-        print("Using optimization")
-        while iter <= max_iter and trials <= max_trials:
-            # if iter % 5 == 0:
-            #       print(iter, dist0)
-            print(iter, dist0)
+        while itr <= max_iter and trials <= max_trials:
+            # if itr % 5 == 0:
+            #       print(itr, dist0)
+            print(itr, dist0)
 
             while pre1 < 0 and trials <= max_trials:
                 rho2_ket = random_pure_dl(dim_list)
@@ -228,18 +252,17 @@ def gilbert(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int
             if trials > max_trials:
                 break
 
-            pre1, rho2, rho2_ket = optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary)
+            pre1, rho2, rho2_ket = optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary, herm)
             p = 1 - pre1 / hs_distance(rho1, rho2)
             dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
             decrement = dist0 - dist1
             if 0 <= p <= 1 and dist1 < dist0:
-                iter += 1
+                itr += 1
                 rho1 = p * rho1 + (1 - p) * rho2
                 rho3 = rho0 - rho1
                 decrement = dist0 - dist1
                 dist0 = dist1
                 rho1_list.append(rho1)
-
                 dist_list.append(dist0)
             if decrement < 0.0000001:
                 rho2_ket = random_pure_dl(dim_list)
@@ -247,10 +270,8 @@ def gilbert(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int
             pre1 = pre_sel(rho0, rho1, rho2)
             trials += 1
     else:
-        while iter < max_iter and trials <= max_trials:
-            # if iter % 5 == 0:
-            #       print(iter, dist0)
-            print(iter, dist0)
+        while itr < max_iter and trials <= max_trials:
+            print(itr, dist0)
 
             while pre1 < 0 and trials <= max_trials:
                 rho2_ket = random_pure_dl(dim_list)
@@ -262,7 +283,7 @@ def gilbert(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int
             p = 1 - pre1 / hs_distance(rho1, rho2)
             dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
             if 0 <= p <= 1 and dist1 < dist0:
-                iter += 1
+                itr += 1
                 rho1 = p * rho1 + (1 - p) * rho2
                 dist0 = dist1
                 rho1_list.append(rho1)
@@ -280,3 +301,11 @@ def make_density(ket):
 
 def get_diagonal(rho):
     return np.diag(np.diag(rho))
+
+def generate_report(dist):
+
+    plt.plot(dist[int(len(dist)/3):])
+    plt.title('H-S distance corrections')
+    plt.show()
+    plt.savefig("dist-series.pdf")
+
