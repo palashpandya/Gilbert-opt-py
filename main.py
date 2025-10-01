@@ -42,8 +42,10 @@ if __name__ == '__main__':
     print(css, dist, trials, stop-start)
     io.mmwrite(outFile, css)
     with open(outFile2,'ab') as f:
-        f.write(b'\n')
+        # f.write(b'\n')
         np.savetxt(f, dist_list)
-#    generate_report(dist_list)
+    #read the whole output file before generating the plot:
+    dist_list = np.loadtxt(outFile2, delimiter=',', dtype=float)
+    generate_report(dist)
 
 
