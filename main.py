@@ -46,6 +46,6 @@ if __name__ == '__main__':
         np.savetxt(f, dist_list)
     #read the whole output file before generating the plot:
     dist_list = np.loadtxt(outFile2, delimiter=',', dtype=float)
-    generate_report(dist)
+    generate_report(dist_list)
 
 

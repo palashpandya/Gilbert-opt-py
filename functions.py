@@ -118,13 +118,13 @@ def to_maximize(x, *args):
         herm[i] = linalg.expm(herm[i])
         offset += lenlist[i]
     unit = reduce(np.kron, herm)
-    rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
+    rho2u = unit @ ((rho2) @ np.transpose(np.conjugate(unit)))
     # print(unit)
     return -np.trace(rho3 @ rho2u).real
 
 def to_maximize2(x, *args):
     # New definition with less expm operations
-    rho2, rho3, base_un, dim_list, lenlist, herm = args
+    rho1, rho2, rho3, base_un, dim_list, lenlist, herm = args
     # herm = [np.eye(d) for d in dim_list]
     # lenlist = [len(base_un[i]) for i in range(len(base_un))]
     offset = 0
@@ -139,9 +139,9 @@ def to_maximize2(x, *args):
     unit = linalg.expm(exponent)
     # rho2u = unit @ np.transpose(np.conjugate(unit))
 
-    rho2u = unit @ (rho2 @ np.transpose(np.conjugate(unit)))
+    rho2u = unit @ (rho2) @ np.transpose(np.conjugate(unit))
     # print(unit)
-    return -np.trace(rho3 @ rho2u).real
+    return -np.trace((rho3) @ (rho2u)).real
 
 
 def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary, herm):
@@ -173,7 +173,7 @@ def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitar
     #     pre11 = pre2
     x0 = np.ones(sum(lenlist))
     x_bounds = optimize.Bounds(np.full_like(x0, -10.), np.full_like(x0, 10.), False)
-    res = optimize.minimize(to_maximize, x0, (rho2, rho3, basis_unitary, dim_list, lenlist, herm), method='bfgs')#, bounds=x_bounds)
+    res = optimize.minimize(to_maximize2, x0, (rho1,rho2, rho3, basis_unitary, dim_list, lenlist, herm), method='bfgs')#, bounds=x_bounds)
     # res = sp.optimize.basinhopping(to_maximize, x0, 100, minimizer_kwargs={
     # 'args': (rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
     # res = sp.optimize.differential_evolution(to_maximize, x_bounds, (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
@@ -192,7 +192,7 @@ def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitar
         exponent += reduce(np.kron, list_id)
         offset += lenlist[i]
     unit = linalg.expm(exponent)
-    rho4 = unit @ rho2new @ np.transpose(np.conjugate(unit))
+    rho4 = unit @ rho2new  @ np.transpose(np.conjugate(unit))
     pre2 = pre_sel(rho0, rho1, rho4)
     # print(pre2,pre11)
 
@@ -304,8 +304,16 @@ def get_diagonal(rho):
 
 def generate_report(dist):
 
-    plt.plot(dist[int(len(dist)/3):])
+    red_dist = dist[int(len(dist)/3):]
+
+    plt.plot(red_dist)
     plt.title('H-S distance corrections')
     plt.show()
     plt.savefig("dist-series.pdf")
+
+    # red_inv = [1/(x-0.428) for x in red_dist]
+    #
+    # plt.plot(red_inv)
+    # plt.title('inverse H-S distance corrections')
+    # plt.show()
 
