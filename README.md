@@ -5,8 +5,11 @@
   The separability problem is an NP-HARD problem, and one of the most fundamental in Quantum Information science.
   Given a density matrix, one would like to find out if the described quantum state is Entangled or separable.
   Gilbert Algorithm is applied here to tackle this problem  by minimizing the HIlbert-Schmidt distance of a given state from the set of separable states.
-  
 </p>
+<p>
+  Instructions: The main file takes all the inputs from the confi.ini file. Edit the relevant values there and run main.py.
+</p>
+  
 <p>
   If you use the code, Please cite: "Hilbert-Schmidt distance and entanglement witnessing", P.Pandya, O.Sakarya, M.Wiesniak (Phys. Rev. A 102, 012409 (2020))
 </p>
