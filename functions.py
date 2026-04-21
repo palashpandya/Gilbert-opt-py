@@ -130,11 +130,12 @@ def to_maximize2(x, *args):
     offset = 0
     l_base = len(base_un)
     exponent = np.zeros((np.prod(dim_list), np.prod(dim_list)), complex)
+    list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
     for i in range(l_base):
         herm[i] = sum(1j * x[j + offset] * base_un[i][j] for j in range(lenlist[i]))
-        list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
         list_id[i] = herm[i]
         exponent += reduce(np.kron, list_id)
+        list_id[i] = np.eye(dim_list[i], dtype=complex)
         offset += lenlist[i]
     unit = linalg.expm(exponent)
     # rho2u = unit @ np.transpose(np.conjugate(unit))
@@ -161,35 +162,19 @@ def optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitar
     #rho2 = make_density(rho2_ket)
     rho2new = rho2
 
-    lenlist = dim_list*dim_list
-    # rho4 = rho2
-    # pre11 = pre1
-    # pre2 = pre_sel(rho0, rho1, rho4)
-    # ostep = 0
-    # while pre2 >= pre11 and ostep < 5:
-    #     print("ostep = %s", ostep, pre2, pre11)
-    #     ostep += 1
-    #     rho2new = rho4
-    #     pre11 = pre2
+    lenlist = [d**2 for d in dim_list]
     x0 = np.ones(sum(lenlist))
-    x_bounds = optimize.Bounds(np.full_like(x0, -10.), np.full_like(x0, 10.), False)
-    res = optimize.minimize(to_maximize, x0, (rho2, rho3, basis_unitary, dim_list, lenlist, herm), method='COBYQA')
-    # res = sp.optimize.basinhopping(to_maximize, x0, 100, minimizer_kwargs={
-    # 'args': (rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
-    # res = sp.optimize.differential_evolution(to_maximize, x_bounds, (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
-    # res = sp.optimize.minimize(to_maximize, x0, (rho2new, rho3, basis_unitary, dim_list, lenlist, herm), 'Nelder-Mead')
-    # res = sp.optimize.dual_annealing(to_maximize, x_bounds,
-    #                                        (rho2, rho3, basis_unitary, dim_list, lenlist, herm))
-    # minimizer_kwargs={args:(rho2, rho3, basis_unitary, dim_list, lenlist, herm)})
+    res = optimize.minimize(to_maximize2, x0, (rho1, rho2, rho3, basis_unitary, dim_list, lenlist, herm), method='COBYQA')
     xres = res.x
     offset = 0
     l_base = len(basis_unitary)
     exponent = np.zeros((np.prod(dim_list), np.prod(dim_list)), complex)
+    list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
     for i in range(l_base):
         herm[i] = sum(1j * xres[j + offset] * basis_unitary[i][j] for j in range(lenlist[i]))
-        list_id = np.array([np.eye(d, dtype=complex) for d in dim_list])
         list_id[i] = herm[i]
         exponent += reduce(np.kron, list_id)
+        list_id[i] = np.eye(dim_list[i], dtype=complex)
         offset += lenlist[i]
     unit = linalg.expm(exponent)
     rho4 = unit @ rho2new  @ np.transpose(np.conjugate(unit))
@@ -295,95 +280,7 @@ def gilbert(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int
     return rho1, dist0, trials, dist_list
 
 def gilbert_only_dist(rho_in: np.array, dim_list: np.array, max_iter: int, max_trials: int, opt_state="on", rng_seed=666, rho1_in=None):
-    """
-    Approximate the Closest Separable State (CSS) to the given state rho_in using Gilbert's algorithm
-    :param rho_in: matrix
-    :param dim_list: list of subsystem dimensions (int)
-    :param max_iter: max iterations/corrections
-    :param max_trials: maximum trials
-    :param rng_seed: seed for RNG
-    :param opt_state: Optimization On/Off, default "on"
-    :param rho1_in: Optional start state
-    # :param file_out: output file for the list of corrections
-    :return: CSS, min HS-distance, number of trials
-    """
-
-    np.random.seed(rng_seed)
-    rho0 = rho_in
-    #print(rho0)
-    if rho1_in is None:
-        rho1 = np.diag(np.diag(rho0))
-    else:
-        rho1 = rho1_in
-    # ndim = np.multiply.reduce(dim_list)
-    print(rho1)
-    rho2_ket = random_pure_dl(dim_list)
-    rho2 = make_density(rho2_ket)
-    dist0 = hs_distance(rho0, rho1)
-    trials = 1
-    decrement = 0.
-    basis_unitary = [gell_mann_basis(x) for x in dim_list]
-    pre1 = pre_sel(rho0, rho1, rho2)
-    pre2 = 0.
-    itr = 1
-    rho1_list = [rho1]
-    dist_list = [dist0]
-    rho3 = rho0 - rho1
-    herm = [np.eye(d, dtype=complex) for d in dim_list]
-    if opt_state.lower() == "on":
-        while itr <= max_iter and trials <= max_trials:
-            # if itr % 5 == 0:
-            #       print(itr, dist0)
-            print(itr, dist0)
-
-            while pre1 < 0 and trials <= max_trials:
-                rho2_ket = random_pure_dl(dim_list)
-                rho2 = make_density(rho2_ket)
-                pre1 = pre_sel(rho0, rho1, rho2)
-                trials += 1
-            if trials > max_trials:
-                break
-
-            pre1, rho2, rho2_ket = optimize_rho2(rho0, rho1, rho2_ket, rho2, rho3, pre1, dim_list, basis_unitary, herm)
-            p = 1 - pre1 / hs_distance(rho1, rho2)
-            dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
-            decrement = dist0 - dist1
-            if 0 <= p <= 1 and dist1 < dist0:
-                itr += 1
-                rho1 = p * rho1 + (1 - p) * rho2
-                rho3 = rho0 - rho1
-                decrement = dist0 - dist1
-                dist0 = dist1
-                rho1_list.append(rho1)
-                dist_list.append(dist0)
-            if decrement < 0.0000001:
-                rho2_ket = random_pure_dl(dim_list)
-                rho2 = make_density(rho2_ket)
-            pre1 = pre_sel(rho0, rho1, rho2)
-            trials += 1
-    else:
-        while itr < max_iter and trials <= max_trials:
-            print(itr, dist0)
-
-            while pre1 < 0 and trials <= max_trials:
-                rho2_ket = random_pure_dl(dim_list)
-                rho2 = make_density(rho2_ket)
-                pre1 = pre_sel(rho0, rho1, rho2)
-                trials += 1
-            if trials > max_trials:
-                break
-            p = 1 - pre1 / hs_distance(rho1, rho2)
-            dist1 = hs_distance(rho0, p * rho1 + (1 - p) * rho2)
-            if 0 <= p <= 1 and dist1 < dist0:
-                itr += 1
-                rho1 = p * rho1 + (1 - p) * rho2
-                dist0 = dist1
-                rho1_list.append(rho1)
-                dist_list.append(dist0)
-            rho2_ket = random_pure_dl(dim_list)
-            rho2 = make_density(rho2_ket)
-            pre1 = pre_sel(rho0, rho1, rho2)
-            trials += 1
+    _, dist0, _, _ = gilbert(rho_in, dim_list, max_iter, max_trials, opt_state, rng_seed, rho1_in)
     return dist0
 
 def make_density(ket):
@@ -399,8 +296,8 @@ def generate_report(dist):
 
     plt.plot(red_dist)
     plt.title('H-S distance corrections')
-    plt.show()
     plt.savefig("dist-series.pdf")
+    plt.show()
 
     # red_inv = [1/(x-0.428) for x in red_dist]
     #
